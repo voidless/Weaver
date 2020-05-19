@@ -24,6 +24,7 @@ struct Configuration {
     let recursiveOff: Bool
     let tests: Bool
     let testableImports: [String]?
+    let swiftlintDisableAll: Bool
     
     private init(inputPathStrings: [String]?,
                  ignoredPathStrings: [String]?,
@@ -33,17 +34,27 @@ struct Configuration {
                  cachePath: Path?,
                  recursiveOff: Bool?,
                  tests: Bool?,
-                 testableImports: [String]?) {
+                 testableImports: [String]?,
+                 swiftlintDisableAll: Bool?) {
 
         self.inputPathStrings = inputPathStrings ?? Defaults.inputPathStrings
         self.ignoredPathStrings = ignoredPathStrings ?? []
-        self.projectPath = projectPath ?? Defaults.projectPath
-        self.mainOutputPath = mainOutputPath ?? Defaults.mainOutputPath
-        self.testsOutputPath = testsOutputPath ?? Defaults.testsOutputPath
+
+        let projectPath = projectPath ?? Defaults.projectPath
+        self.projectPath = projectPath
+
+        self.mainOutputPath = mainOutputPath
+            .map { $0.extension == "swift" ? $0 : $0 + Defaults.mainOutputFileName }
+            .map { $0.isRelative ? projectPath + $0 : $0 } ?? Defaults.mainOutputPath
+        self.testsOutputPath = testsOutputPath
+            .map { $0.extension == "swift" ? $0 : $0 + Defaults.testOutputFileName }
+            .map { $0.isRelative ? projectPath + $0 : $0 } ?? Defaults.testsOutputPath
+
         self.cachePath = cachePath ?? Defaults.cachePath
         self.recursiveOff = recursiveOff ?? Defaults.recursiveOff
         self.tests = tests ?? Defaults.tests
         self.testableImports = testableImports
+        self.swiftlintDisableAll = swiftlintDisableAll ?? Defaults.swiftlintDisableAll
     }
     
     init(configPath: Path? = nil,
@@ -55,7 +66,8 @@ struct Configuration {
          cachePath: Path? = nil,
          recursiveOff: Bool? = nil,
          tests: Bool? = nil,
-         testableImports: [String]? = nil) throws {
+         testableImports: [String]? = nil,
+         swiftlintDisableAll: Bool? = nil) throws {
         
         let projectPath = projectPath ?? Defaults.projectPath
         let configPath = Configuration.prepareConfigPath(configPath ?? Defaults.configPath, projectPath: projectPath)
@@ -68,32 +80,32 @@ struct Configuration {
             configuration = try jsonDecoder.decode(Configuration.self, from: try configPath.read())
         case ("yaml"?, true):
             let yamlDecoder = YAMLDecoder()
-            configuration = try yamlDecoder.decode(Configuration.self, from: try configPath.read(), userInfo: [:])
+            configuration = try yamlDecoder.decode(Configuration.self, from: try configPath.read())
         default:
-            configuration = Configuration(inputPathStrings: inputPathStrings,
-                                          ignoredPathStrings: ignoredPathStrings,
-                                          projectPath: projectPath,
-                                          mainOutputPath: mainOutputPath,
-                                          testsOutputPath: testsOutputPath,
-                                          cachePath: cachePath,
-                                          recursiveOff: recursiveOff,
-                                          tests: tests,
-                                          testableImports: testableImports)
+            configuration = Configuration(
+                inputPathStrings: inputPathStrings,
+                ignoredPathStrings: ignoredPathStrings,
+                projectPath: projectPath,
+                mainOutputPath: mainOutputPath,
+                testsOutputPath: testsOutputPath,
+                cachePath: cachePath,
+                recursiveOff: recursiveOff,
+                tests: tests,
+                testableImports: testableImports,
+                swiftlintDisableAll: swiftlintDisableAll
+            )
         }
         
         self.inputPathStrings = inputPathStrings ?? configuration.inputPathStrings
         self.ignoredPathStrings = ignoredPathStrings ?? configuration.ignoredPathStrings
         self.projectPath = projectPath
+        self.mainOutputPath = mainOutputPath ?? configuration.mainOutputPath
+        self.testsOutputPath = testsOutputPath ?? configuration.testsOutputPath
         self.cachePath = cachePath
         self.recursiveOff = recursiveOff ?? configuration.recursiveOff
         self.tests = tests ?? configuration.tests
         self.testableImports = testableImports ?? configuration.testableImports
-        
-        let mainOutputPath = mainOutputPath ?? configuration.mainOutputPath
-        self.mainOutputPath = mainOutputPath.isRelative ? projectPath + configuration.mainOutputPath : mainOutputPath
-
-        let testsOutputPath = testsOutputPath ?? configuration.testsOutputPath
-        self.testsOutputPath = testsOutputPath.isRelative ? projectPath + configuration.testsOutputPath : testsOutputPath
+        self.swiftlintDisableAll = swiftlintDisableAll ?? configuration.swiftlintDisableAll
     }
     
     private static func prepareConfigPath(_ configPath: Path, projectPath: Path) -> Path {
@@ -125,13 +137,16 @@ extension Configuration {
         static let configPath = Path(".")
         static let configYAMLFile = Path(".weaver.yaml")
         static let configJSONFile = Path(".weaver.json")
-        static let mainOutputPath = Path(".")
-        static let testsOutputPath = Path(".")
+        static let mainOutputFileName = Path("Weaver.swift")
+        static let mainOutputPath = Path(".") + mainOutputFileName
+        static let testOutputFileName = Path("WeaverTests.swift")
+        static let testsOutputPath = Path(".") + testOutputFileName
         static let cachePath = Path(".weaver_cache.json")
         static let recursiveOff = false
         static let inputPathStrings = ["."]
         static let detailedResolvers = false
         static let tests = false
+        static let swiftlintDisableAll = true
         
         static var projectPath: Path {
             if let projectPath = ProcessInfo.processInfo.environment["WEAVER_PROJECT_PATH"] {
@@ -157,6 +172,7 @@ extension Configuration: Decodable {
         case tests
         case testableImports = "testable_imports"
         case cachePath = "cache_path"
+        case swiftlintDisableAll = "swiftlint_disable_all"
     }
     
     public init(from decoder: Decoder) throws {
@@ -165,16 +181,21 @@ extension Configuration: Decodable {
         if container.contains(.projectPath) {
             Logger.log(.error, "\(Keys.projectPath.rawValue) cannot be overriden in the configuration file.")
         }
-        
-        projectPath = Defaults.projectPath
-        mainOutputPath = try container.decodeIfPresent(Path.self, forKey: .mainOutputPath) ?? Defaults.mainOutputPath
-        testsOutputPath = try container.decodeIfPresent(Path.self, forKey: .testsOutputPath) ?? Defaults.testsOutputPath
-        inputPathStrings = try container.decodeIfPresent([String].self, forKey: .inputPaths) ?? Defaults.inputPathStrings
-        ignoredPathStrings = try container.decodeIfPresent([String].self, forKey: .ignoredPaths) ?? []
-        recursiveOff = !(try container.decodeIfPresent(Bool.self, forKey: .recursive) ?? !Defaults.recursiveOff)
-        tests = try container.decodeIfPresent(Bool.self, forKey: .tests) ?? Defaults.tests
-        testableImports = try container.decodeIfPresent([String].self, forKey: .testableImports)
-        cachePath = try container.decodeIfPresent(Path.self, forKey: .cachePath) ?? Defaults.cachePath
+
+        let recursive = try container.decodeIfPresent(Bool.self, forKey: .recursive)
+
+        self.init(
+            inputPathStrings: try container.decodeIfPresent([String].self, forKey: .inputPaths),
+            ignoredPathStrings: try container.decodeIfPresent([String].self, forKey: .ignoredPaths),
+            projectPath: nil,
+            mainOutputPath: try container.decodeIfPresent(Path.self, forKey: .mainOutputPath),
+            testsOutputPath: try container.decodeIfPresent(Path.self, forKey: .testsOutputPath),
+            cachePath: try container.decodeIfPresent(Path.self, forKey: .cachePath),
+            recursiveOff: recursive.map { !$0 },
+            tests: try container.decodeIfPresent(Bool.self, forKey: .tests),
+            testableImports: try container.decodeIfPresent([String].self, forKey: .testableImports),
+            swiftlintDisableAll: try container.decodeIfPresent(Bool.self, forKey: .swiftlintDisableAll)
+        )
     }
 }
 
@@ -195,33 +216,41 @@ extension Configuration {
     
     func inputPaths() throws -> [Path]  {
         var inputPaths = Set<Path>()
-
-        let inputDirectories = Set(inputPathStrings
-            .lazy
-            .map { self.projectPath + $0 }
-            .filter { $0.exists && $0.isDirectory }
-            .map { $0.absolute().string })
-
-        if inputDirectories.isEmpty == false {
-            let grepArguments = ["-lR", "-e", Configuration.annotationRegex, "-e", Configuration.propertyWrapperRegex] + Array(inputDirectories)
-            inputPaths.formUnion(try shellOut(to: "grep", arguments: grepArguments)
-                .split(separator: "\n")
-                .lazy
-                .map { Path(String($0)) }
-                .filter { $0.extension == "swift" })
-        }
         
         inputPaths.formUnion(inputPathStrings
             .lazy
             .map { self.projectPath + $0 }
+            .flatMap { $0.isFile ? [$0] : self.recursivePathsByPattern(fromDirectory: $0) }
             .filter { $0.exists && $0.isFile && $0.extension == "swift" })
 
         inputPaths.subtract(try ignoredPathStrings
             .lazy
             .map { self.projectPath + $0 }
-            .flatMap { $0.isFile ? [$0] : recursive ? try $0.recursiveChildren() : try $0.children() }
+            .flatMap { $0.isFile ? [$0] : try paths(fromDirectory: $0) }
             .filter { $0.extension == "swift" })
         
         return inputPaths.sorted()
+    }
+
+    private func recursivePathsByPattern(fromDirectory directory: Path) -> [Path] {
+        let grepArguments = [
+            "-lR",
+            "-e", Configuration.annotationRegex,
+            "-e", Configuration.propertyWrapperRegex,
+            directory.absolute().string
+        ]
+        // if there are no files matching the pattern
+        // command grep return exit 1, and ShellOut throws an exception with empty message
+        guard let grepResult = try? shellOut(to: "grep", arguments: grepArguments) else {
+            return []
+        }
+
+        return grepResult
+            .split(separator: "\n")
+            .map { Path(String($0)) }
+    }
+
+    private func paths(fromDirectory directory: Path) throws -> [Path] {
+        recursive ? try directory.recursiveChildren() : try directory.children()
     }
 }
