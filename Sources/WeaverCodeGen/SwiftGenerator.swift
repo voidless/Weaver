@@ -766,11 +766,25 @@ static func _pushDynamicResolver<Resolver>(_ resolver: Resolver) {
 
                     let assignments: (MetaDependencyDeclaration) -> [Assignment] = { resolvedDeclaration in
                         let isRootDependencyContainer = dependencyContainer.sources.isEmpty && publicInterface == false
-                        let builderValue = Variable._self.reference + .named("builder") | .call(Tuple()
-                            .adding(parameter: TupleParameter(value:
-                                (isRootDependencyContainer ? Variable._self.reference + .none : .none) | .named(resolvedDeclaration.declarationName)
-                            ))
-                        )
+                        let builderValue: Reference
+
+                        switch reference.kind {
+                        case .parameter:
+                            builderValue = Variable._self.reference + .named("builder") | .call(Tuple()
+                                .adding(parameter: TupleParameter(value:
+                                    (isRootDependencyContainer ? Variable._self.reference + .none : .none) | .named(resolvedDeclaration.declarationName)
+                                ))
+                            )
+
+                        case .reference:
+                            builderValue = .named("getBuilder") | .call(Tuple()
+                                .adding(parameter: TupleParameter(name: "for", value: Value.string(resolvedDeclaration.declarationName)))
+                                .adding(parameter: TupleParameter(name: "type", value: resolvedDeclaration.type.typeID.reference + .named(.`self`)))
+                            )
+
+                        case .registration:
+                            fatalError("Invalid kind for input reference")
+                        }
 
                         var assignments = [Assignment(
                             variable: Variable._self.reference + .named(declaration.buildersSubcriptGet),
