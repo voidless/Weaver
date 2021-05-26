@@ -279,8 +279,6 @@ private extension Inspector {
         
         let cacheIndex = InspectorCacheIndex(dependency, target)
         guard !buildCache.contains(cacheIndex) else { return }
-        buildCache.insert(cacheIndex)
-        
         guard dependency.kind != .reference && dependency.configuration.customBuilder == nil else { return }
         
         var visitedDependencyContainers = Set<ConcreteType>()
@@ -288,6 +286,7 @@ private extension Inspector {
                               from: dependency,
                               visitedDependencyContainers: &visitedDependencyContainers,
                               history: [])
+        buildCache.insert(cacheIndex)
     }
 }
 
@@ -315,11 +314,15 @@ private extension Inspector {
             var visitedDependencyContainersCopy = visitedDependencyContainers
             
             let target = try dependencyGraph.dependencyContainer(for: dependency)
+            let cacheIndex = InspectorCacheIndex(dependency, target)
+            guard !buildCache.contains(cacheIndex) else { return }
             try buildDependencies(of: target,
                                   from: sourceDependency,
                                   visitedDependencyContainers: &visitedDependencyContainersCopy,
                                   history: history)
+            buildCache.insert(cacheIndex)
         }
+
     }
 }
 
