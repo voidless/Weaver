@@ -446,6 +446,7 @@ static func _pushDynamicResolver<Resolver>(_ resolver: Resolver) {
                     "(\((1..<parameterCount+1).map { "P\($0)" }.joined(separator: ", "))) -> \(TypeIdentifier.abstractType.swiftString)"
                 ))
             )
+            .with(accessLevel: .public)
             
             let wrappedValueType: TypeIdentifier
             if parameterCount == 0 {
@@ -476,6 +477,7 @@ static func _pushDynamicResolver<Resolver>(_ resolver: Resolver) {
 
             let type = Type(identifier: typeID)
                 .with(kind: .struct)
+                .with(accessLevel: .public)
                 .adding(genericParameter: GenericParameter(name: "ConcreteType"))
                 .adding(genericParameter: GenericParameter(name: "AbstractType"))
                 .adding(genericParameters: (1..<parameterCount+1).map { GenericParameter(name: "P\($0)") })
@@ -496,6 +498,7 @@ static func _pushDynamicResolver<Resolver>(_ resolver: Resolver) {
                 .adding(member: EmptyLine())
                 .adding(member: ComputedProperty(variable: Variable(name: "wrappedValue")
                     .with(type: wrappedValueType))
+                    .with(accessLevel: .public)
                     .adding(member: Return(value: Variable.resolver.reference | (parameterCount == 0 ? .call() : .none)))
                 )
             
